@@ -8,6 +8,8 @@ function createDecoderStream() {
 var STATE_HEADER = 0
   , STATE_DECODE = 1
   , STATE_ERROR = 666
+var CT_BINARY = 0
+  , CT_ASCII = 1
 
 inherits(Decoder, Transform)
 function Decoder() {
@@ -16,18 +18,22 @@ function Decoder() {
   this.state = STATE_HEADER
   this.compressionType = -1
   this.dictionarySizeBits = -1
+  this.dictionarySizeMask = 0xFFFF
   this.bitBuffer = -1
   this.extraBits = -1
 
   this.headerBuffer = null
+  this.workBuffer = null
+  this.workPos = -1
+  this.decodeCb = null
 
   if (!Decoder.lengthCodes) {
-    Decoder.lengthCodes = genDecodeTabs(lenCode, lenBits)
+    Decoder.lengthCodes = genDecodeTables(lenCode, lenBits)
   }
   this.lengthCodes = Decoder.lengthCodes
 
   if (!Decoder.distPosCodes) {
-    Decoder.distPosCodes = genDecodeTabs(distCode, distBits)
+    Decoder.distPosCodes = genDecodeTables(distCode, distBits)
   }
   this.distPosCodes = Decoder.distPosCodes
 }
@@ -36,13 +42,26 @@ Decoder.prototype._transform = function(block, encoding, done) {
   var pos = 0
   if (this.state == STATE_HEADER) {
     pos = this.readHeader(block)
-    if (this.headerBuffer) {
+    if (pos && this.headerBuffer) {
       block = this.headerBuffer
+      this.headerBuffer = null
     }
   }
 
   if (this.state == STATE_DECODE) {
-    pos = this.decode(block, pos)
+    // We have two possible states:
+    // State 1) This is our first decode. In this case, we simply call decode
+    //
+    // State 2) This is a second or later decode, meaning something is waiting on bytes to continue
+    // decoding. The thing that is waiting will leave a hanging callback in decodeCb, so we call
+    // that with the new bytes (and remove the callback)
+    if (this.decodeCb) {
+      var cb = this.decodeCb
+      this.decodeCb = null
+      cb(block, pos)
+    } else {
+      this.decode(block, pos)
+    }
   }
 
   done()
@@ -53,6 +72,21 @@ Decoder.prototype._flush = function(done) {
     return done(new Error('Not enough data to decode'))
   }
 
+  if (this.state == STATE_DECODE && this.decodeCb) {
+    var cb = this.decodeCb
+    this.decodeCb = null
+    cb(null)
+  }
+
+  if (this.state == STATE_DECODE && this.workPos > 0x1000) {
+    // Flush the remaining decoded bytes
+    var output = new Buffer(this.workPos - 0x1000)
+    this.workBuffer.copy(output, 0, 0x1000, this.workPos)
+    this.push(output)
+  }
+
+  this.headerBuffer = null
+  this.workBuffer = null
   done()
 }
 
@@ -66,15 +100,226 @@ Decoder.prototype.readHeader = function(block) {
   this.dictionarySizeBits = this.headerBuffer.readUInt8(1)
   this.bitBuffer = this.headerBuffer.readUInt8(2)
   this.extraBits = 0
+  this.dictionarySizeMask = 0xFFFF >> (0x10 - this.dictionarySizeBits)
+
+  if (this.compressionType != CT_BINARY && this.compressionType != CT_ASCII) {
+    this.emit('error', new Error('Unsupported compression type: ' + this.compressionType))
+    this.state = STATE_ERROR
+    return 0
+  }
+  if (this.dictionarySizeBits < 4 || this.dictionarySizeBits > 6) {
+    this.emit('error', new Error('Unsupported dictionary size: ' + this.dictionarySizeBits))
+    this.state = STATE_ERROR
+    return 0
+  }
+
   this.state = STATE_DECODE
+  // TODO(tec27): I'm fairly certain this buffer can be sized down (or at the very least, handled
+  // differently to avoid copying a lot of data around in it)
+  this.workBuffer = new Buffer(0x2203)
+  this.workPos = 0x1000
   return 3
 }
 
 Decoder.prototype.decode = function(block, pos) {
+  var r = {
+    block: block,
+    pos: pos,
+    err: false
+  }
+  var nextLiteral
 
+  // Decode a literal from the input data
+  // The return value can either be an uncompressed byte (< 0x100) or an encoded length of the
+  // repeating byte sequence that is to be copied to the current buffer position
+  while((nextLiteral = this.decodeLiteral(r)) < 0x305) {
+    // literal of 0x100 means repeating sequence of 0x2 bytes
+    // literal of 0x101 means repeating  sequence of 0x3 bytes
+    // ...
+    // literal of 0x304 means repeating sequence of 0x206 bytes
+    if (nextLiteral >= 0x100) {
+      var repetitionLength = nextLiteral - 0xFE
+        , minusDistance = this.decodeDistance(r, repetitionLength)
+      if (r.err) {
+        nextLiteral = 0x306
+        break
+      }
+
+      var src = this.workPos - minusDistance
+      this.workBuffer.copy(this.workBuffer, this.workPos, src, src + repetitionLength)
+      this.workPos += repetitionLength
+    } else {
+      this.workBuffer[this.workPos] = nextLiteral
+      this.workPos++
+    }
+
+    if (this.workPos >= 0x2000) {
+      // Output the 1000 bytes we've decoded
+      var output = new Buffer(0x1000)
+      this.workBuffer.copy(output, 0, 0x1000, 0x2000)
+      this.push(output)
+
+      // Copy the decoded data back around to the first half of the buffer, needed because the
+      // decoding might reuse some of them as repetitions. Note that if the buffer overflowed
+      // previously (into the 0x200ish-odd byte section at the end), the extra data will now be in
+      // the "active" area of the buffer, ready to be output when the next flush happens
+      this.workBuffer.copy(this.workBuffer, 0, 0x1000, this.workPos - 0x1000)
+      this.workPos -= 0x1000
+    }
+  }
+
+  if (nextLiteral == 0x306) {
+    this.state = STATE_ERROR
+    return
+  }
 }
 
-function genDecodeTabs(startIndexes, lengthBits) {
+Decoder.prototype.decodeLiteral = function(r) {
+  // Test the current bit in the buffer. If it is not set, simply return the next 8 bits
+  if (this.bitBuffer & 1) {
+    this.readBits(r, 1)
+    if (r.err) {
+      return 0x306
+    }
+
+    // The next 8 bits hold the index to the length code table
+    var lengthCode = this.lengthCodes[this.bitBuffer & 0xFF]
+    // Discard the appropriate number of bits
+    this.readBits(r, lenBits[lengthCode])
+    if (r.err) {
+      return 0x306
+    }
+
+    // Check if there are some extra bits for this length code
+    var extraLengthBits = exLenBits[lengthCode]
+    if (extraLengthBits) {
+      var extraLength = this.bitBuffer & ((1 << extraLengthBits) - 1)
+
+      this.readBits(r, extraLengthBits)
+      if (r.err) {
+        if (lengthCode + extraLength != 0x10E) {
+          return 0x306
+        } else {
+          r.err = false
+        }
+      }
+      lengthCode = lenBase[lengthCode] + extraLength
+    }
+
+    return lengthCode + 0x100
+  }
+
+  this.readBits(r, 1)
+  if (r.err) {
+    return 0x306
+  }
+
+  var result
+  // If this is binary compression, read 8 bits and return them
+  if (this.compressionType == CT_BINARY) {
+    result = this.bitBuffer & 0xFF
+    this.readBits(r, 8)
+    if (r.err) {
+      return 0x306
+    }
+    return result
+  }
+
+  // With ASCII, the decoding is slightly different
+  if (this.bitBuffer & 0xFF) {
+    result = this.asciiTable2C34[this.bitBuffer & 0xFF]
+    if (result == 0xFF) {
+      if (this.bitBuffer & 0x3F) {
+        this.readBits(r, 4)
+        if (r.err) {
+          return 0x306
+        }
+
+        result = this.asciiTable2D34[this.bitBuffer & 0xFF]
+      } else {
+        this.readBits(r, 6)
+        if (r.err) {
+          return 0x306
+        }
+
+        result = this.asciiTable2E34[this.bitBuffer & 0x7F]
+      }
+    }
+  } else {
+    this.readBits(r, 8)
+    if (r.err) {
+      return 0x306
+    }
+
+    result = this.asciiTable2EB4[this.bitBuffer & 0xFF]
+  }
+
+  this.readBits(r, chBitsAsc[result])
+  return r.err ? 0x306 : result
+}
+
+// Decodes the distance of a reptition, backwards relative to the current output buffer position
+Decoder.prototype.decodeDistance = function(r, repetitionLength) {
+  var distPosCode = this.distPosCodes[this.bitBuffer & 0xFF]
+    , distPosBits = distBits[distPosCode]
+    , distance
+  this.readBits(r, distPosBits)
+  if (r.err) {
+    return 0
+  }
+
+  if (repetitionLength == 2) {
+    // If the repetition is only 2 bytes in length, then take 2 bits from the stream in order to get
+    // the distance
+    distance = (distPosCode << 2) | (this.bitBuffer & 0x03)
+    this.readBits(r, 2)
+    if (r.err) {
+      return 0
+    }
+  } else {
+    // If the repetition is more than 2 bytes in length, then take dictionarySizeBits bits in order
+    // to get the distance
+    distance = (distPosCode << this.dictionarySizeBits) | (this.bitBuffer & this.dictionarySizeMask)
+    this.readBits(r, this.dictionarySizeBits)
+    if (r.err) {
+      return 0
+    }
+  }
+
+  return distance + 1
+}
+
+// Reads a number of new bits into the bit buffer, discarding old bits in the
+// process. New bytes will be read onto the high side of the buffer from the
+// current block as needed. This function assumes numBits <= 8
+Decoder.prototype.readBits = function(r, numBits) {
+  if (numBits <= this.extraBits) {
+    // we already have enough bits in the bit buffer, just shift
+    this.extraBits -= numBits
+    this.bitBuffer >>= numBits
+    return
+  }
+
+  // Align the extra bits with the high edge of the active byte
+  this.bitBuffer >>= this.extraBits
+  if (r.pos == r.block.length) {
+    // We don't have enough data in this block to fill the necessary bits
+    // TODO(tec27): handle this better :)
+    console.log('OH FUCK WE NEED MORE DATA')
+    r.err = true
+    return
+  }
+
+  // Place the new byte in the second byte of the bitBuffer
+  this.bitBuffer |= r.block[r.pos] << 8
+  r.pos++
+  // Shift the bytes down the last necessary part
+  this.bitBuffer >>= numBits - this.extraBits
+  this.extraBits = (this.extraBits - numBits) + 8
+  return
+}
+
+function genDecodeTables(startIndexes, lengthBits) {
   var result = []
 
   var i, j, length

@@ -1,6 +1,7 @@
 var test = require('tap').test
   , fs = require('fs')
   , concat = require('concat-stream')
+  , through = require('through2')
 
 var createDecoder = require('../')
 
@@ -16,6 +17,32 @@ test('decodes files with large dictionaries', function(t) {
   doTest(t, 'large.imploded', 'large.txt')
 })
 
+test('decodes files when buffers are split up', function(t) {
+  var d = createDecoder()
+    , actual
+    , expected
+
+  t.plan(1)
+
+  fs.createReadStream('small.imploded').pipe(through(function(block, enc, done) {
+    // be super-adversarial with reading: every byte in a separate buffer
+    for (var i = 0; i < block.length; i++) {
+      this.push(block.slice(i, i + 1))
+    }
+    done()
+  })).pipe(d).pipe(concat(function(data) {
+    actual = data
+    checkEq(t, actual, expected)
+  })).on('error' ,function(err) {
+    t.fail('decoding error: ' + err)
+  })
+
+  fs.createReadStream('small.txt').pipe(concat(function(data) {
+    expected = data
+    checkEq(t, actual, expected)
+  }))
+})
+
 function doTest(t, compressed, uncompressed) {
   var d = createDecoder()
     , actual
@@ -26,7 +53,9 @@ function doTest(t, compressed, uncompressed) {
   fs.createReadStream(compressed).pipe(d).pipe(concat(function(data) {
     actual = data
     checkEq(t, actual, expected)
-  }))
+  })).on('error', function(err) {
+    t.fail('decoding error: ' + err)
+  })
   fs.createReadStream(uncompressed).pipe(concat(function(data) {
     expected = data
     checkEq(t, actual, expected)
