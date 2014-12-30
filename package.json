@@ -1,0 +1,31 @@
+{
+  "name": "implode-decoder",
+  "version": "0.0.1",
+  "description": "A pure JS decoder for the PKWare implode compression algorithm",
+  "main": "index.js",
+  "scripts": {
+    "test": "tap ./test/*.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tec27/implode-decoder"
+  },
+  "keywords": [
+    "implode",
+    "pkware",
+    "explode"
+  ],
+  "author": "Travis Collins <travis@tec27.com> (http://tec27.com/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/tec27/implode-decoder/issues"
+  },
+  "homepage": "https://github.com/tec27/implode-decoder",
+  "dependencies": {
+    "inherits": "^2.0.1"
+  },
+  "devDependencies": {
+    "concat-stream": "^1.4.7",
+    "tap": "^0.4.13"
+  }
+}
