@@ -1,6 +1,6 @@
 {
   "name": "implode-decoder",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A pure JS decoder for the PKWare implode compression algorithm",
   "main": "index.js",
   "scripts": {
