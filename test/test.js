@@ -6,19 +6,19 @@ var test = require('tape').test
 var createDecoder = require('../')
 
 test('decodes files with small dictionaries', function(t) {
-  doTest(t, 'small.imploded', 'small.txt')
+  doTest(t, 'small.imploded', 'small.decomp')
 })
 
 test('decodes files with medium dictionaries', function(t) {
-  doTest(t, 'medium.imploded', 'medium.txt')
+  doTest(t, 'medium.imploded', 'medium.decomp')
 })
 
 test('decodes files with large dictionaries', function(t) {
-  doTest(t, 'large.imploded', 'large.txt')
+  doTest(t, 'large.imploded', 'large.decomp')
 })
 
 test('decodes files that were ASCII compressed', function(t) {
-  doTest(t, 'large.imploded.ascii', 'large.txt')
+  doTest(t, 'large.imploded.ascii', 'large.decomp')
 })
 
 test('decodes files when buffers are split up', function(t) {
@@ -41,7 +41,7 @@ test('decodes files when buffers are split up', function(t) {
     t.fail('decoding error: ' + err)
   })
 
-  fs.createReadStream(__dirname + '/medium.txt').pipe(concat(function(data) {
+  fs.createReadStream(__dirname + '/medium.decomp').pipe(concat(function(data) {
     expected = data
     checkEq(t, actual, expected)
   }))
