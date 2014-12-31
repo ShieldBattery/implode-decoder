@@ -16,7 +16,7 @@ Implementation is inspired by [StormLib's explode.c](https://github.com/ladislav
 The only exported function in this module is a function to create a streams2 Transform stream. You
 may use the resulting stream as you would any other Transform stream.
 
-```
+```javascript
 var decodeImplode = require('implode-decoder')
   , fs = require('fs')
 
