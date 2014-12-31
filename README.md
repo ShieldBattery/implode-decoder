@@ -30,6 +30,7 @@ A simple performance test of a "large" imploded file is included in the `perf/` 
 this test alongside an analagous test written in C using StormLib, with the following results:
 
 **StormLib:** `median: 4.468634 ms`
+
 **implode-decoder:** `median: 4.314142 ms`
 
 Performance characteristics should be relatively similar to StormLib's implementation, although this

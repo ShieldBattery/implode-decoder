@@ -102,9 +102,9 @@ Decoder.prototype.readHeader = function(block) {
     return
   }
 
-  this.compressionType = this.inBuffer.readUInt8(0)
-  this.dictionarySizeBits = this.inBuffer.readUInt8(1)
-  this.bitBuffer = this.inBuffer.readUInt8(2)
+  this.compressionType = this.inBuffer[0]
+  this.dictionarySizeBits = this.inBuffer[1]
+  this.bitBuffer = this.inBuffer[2]
   this.extraBits = 0
   this.dictionarySizeMask = 0xFFFF >> (0x10 - this.dictionarySizeBits)
 
