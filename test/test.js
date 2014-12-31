@@ -1,4 +1,4 @@
-var test = require('tap').test
+var test = require('tape').test
   , fs = require('fs')
   , concat = require('concat-stream')
   , through = require('through2')
@@ -24,7 +24,7 @@ test('decodes files when buffers are split up', function(t) {
 
   t.plan(1)
 
-  fs.createReadStream('small.imploded').pipe(through(function(block, enc, done) {
+  fs.createReadStream(__dirname + '/medium.imploded').pipe(through(function(block, enc, done) {
     // be super-adversarial with reading: every byte in a separate buffer
     for (var i = 0; i < block.length; i++) {
       this.push(block.slice(i, i + 1))
@@ -37,7 +37,7 @@ test('decodes files when buffers are split up', function(t) {
     t.fail('decoding error: ' + err)
   })
 
-  fs.createReadStream('small.txt').pipe(concat(function(data) {
+  fs.createReadStream(__dirname + '/medium.txt').pipe(concat(function(data) {
     expected = data
     checkEq(t, actual, expected)
   }))
@@ -50,13 +50,13 @@ function doTest(t, compressed, uncompressed) {
 
   t.plan(1)
 
-  fs.createReadStream(compressed).pipe(d).pipe(concat(function(data) {
+  fs.createReadStream(__dirname + '/' + compressed).pipe(d).pipe(concat(function(data) {
     actual = data
     checkEq(t, actual, expected)
   })).on('error', function(err) {
     t.fail('decoding error: ' + err)
   })
-  fs.createReadStream(uncompressed).pipe(concat(function(data) {
+  fs.createReadStream(__dirname + '/' + uncompressed).pipe(concat(function(data) {
     expected = data
     checkEq(t, actual, expected)
   }))
