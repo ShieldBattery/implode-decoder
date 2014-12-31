@@ -17,6 +17,10 @@ test('decodes files with large dictionaries', function(t) {
   doTest(t, 'large.imploded', 'large.txt')
 })
 
+test('decodes files that were ASCII compressed', function(t) {
+  doTest(t, 'large.imploded.ascii', 'large.txt')
+})
+
 test('decodes files when buffers are split up', function(t) {
   var d = createDecoder()
     , actual

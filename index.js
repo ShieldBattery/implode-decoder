@@ -119,6 +119,10 @@ Decoder.prototype.readHeader = function(block) {
     return
   }
 
+  if (this.compressionType == CT_ASCII) {
+    this.generateAsciiTables()
+  }
+
   this.state = STATE_DECODE
   this.inPos = 3
   this.singleLiteralState =
@@ -365,6 +369,17 @@ Decoder.prototype.readBits = function(numBits) {
   return true
 }
 
+Decoder.prototype.generateAsciiTables = function() {
+  if (!Decoder.asciiTable2C34) {
+    genAsciiTables()
+  }
+
+  this.asciiTable2C34 = Decoder.asciiTable2C34;
+  this.asciiTable2D34 = Decoder.asciiTable2D34;
+  this.asciiTable2E34 = Decoder.asciiTable2E34;
+  this.asciiTable2EB4 = Decoder.asciiTable2EB4;
+}
+
 function genDecodeTables(startIndexes, lengthBits) {
   var result = []
 
@@ -377,6 +392,65 @@ function genDecodeTables(startIndexes, lengthBits) {
   }
 
   return result
+}
+
+function genAsciiTables() {
+  Decoder.asciiTable2C34 = []
+  Decoder.asciiTable2D34 = []
+  Decoder.asciiTable2E34 = []
+  Decoder.asciiTable2EB4 = []
+
+  var codeIndex = 0xFF
+    , acc
+    , add
+    , count
+  for (count = 0x00FF; codeIndex >= 0; codeIndex--, count--) {
+    var bitsIndex = count
+      , bitsValue = chBitsAsc[bitsIndex]
+    if (bitsValue <= 8) {
+      add = 1 << bitsValue
+      acc = chCodeAsc[codeIndex]
+
+      do {
+        Decoder.asciiTable2C34[acc] = count
+        acc += add
+      } while (acc < 0x100)
+    } else if ((acc = chCodeAsc[codeIndex] & 0xFF)) {
+      Decoder.asciiTable2C34[acc] = 0xFF
+
+      if (chCodeAsc[codeIndex] & 0x3F) {
+        bitsValue -= 4
+        chBitsAsc[bitsIndex] = bitsValue
+
+        add = 1 << bitsValue
+        acc = chCodeAsc[codeIndex] >> 4
+        do {
+          Decoder.asciiTable2D34[acc] = count
+          acc += add
+        } while (acc < 0x100)
+      } else {
+        bitsValue -= 6
+        chBitsAsc[bitsIndex] = bitsValue
+
+        add = 1 << bitsValue
+        acc = chCodeAsc[codeIndex] >> 6
+        do {
+          Decoder.asciiTable2E34[acc] = count
+          acc += add
+        } while (acc < 0x80)
+      }
+    } else {
+      bitsValue -= 8
+      chBitsAsc[bitsIndex] = bitsValue
+
+      add = 1 << bitsValue
+      acc = chCodeAsc[codeIndex] >> 8
+      do {
+        Decoder.asciiTable2EB4[acc] = count
+        acc += add
+      } while (acc < 0x100)
+    }
+  }
 }
 
 var distBits = [
