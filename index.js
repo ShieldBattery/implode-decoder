@@ -7,15 +7,15 @@ function createDecoderStream() {
 
 var STATE_HEADER = 0
   , STATE_DECODE = 1
-  , STATE_REPEATED_LITERAL = 20
-  , STATE_REPEATED_EXTRA_LENGTH = 21
-  , STATE_BINARY_LITERAL = 30
-  , STATE_ASCII_LITERAL = 40
-  , STATE_ASCII_INTERPRET_RESULT = 41
-  , STATE_INTERPRET_REPEATED_LITERAL = 50
-  , STATE_GET_DISTANCE_BITS = 51
-  , STATE_WRITE_REPEATED_LITERAL = 52
-  , STATE_WRITE_SINGLE_LITERAL = 60
+  , STATE_REPEATED_LITERAL = 2
+  , STATE_REPEATED_EXTRA_LENGTH = 3
+  , STATE_BINARY_LITERAL = 4
+  , STATE_ASCII_LITERAL = 5
+  , STATE_ASCII_INTERPRET_RESULT = 6
+  , STATE_INTERPRET_REPEATED_LITERAL = 7
+  , STATE_GET_DISTANCE_BITS = 8
+  , STATE_WRITE_REPEATED_LITERAL = 9
+  , STATE_WRITE_SINGLE_LITERAL = 10
   , STATE_TERMINATED = 100
   , STATE_ERROR = 666
 var CT_BINARY = 0
@@ -129,36 +129,44 @@ Decoder.prototype.readHeader = function(block) {
   this.workPos = 0x1000
 }
 
+var DECODE_FUNCS = []
+DECODE_FUNCS[STATE_DECODE] = 'decodeInitial'
+
+DECODE_FUNCS[STATE_REPEATED_LITERAL] = 'decodeRepeatedLiteral'
+DECODE_FUNCS[STATE_REPEATED_EXTRA_LENGTH] = 'decodeRepeatedExtraLength'
+
+DECODE_FUNCS[STATE_BINARY_LITERAL] = 'decodeBinaryLiteral'
+
+DECODE_FUNCS[STATE_ASCII_LITERAL] = 'decodeAsciiLiteral'
+DECODE_FUNCS[STATE_ASCII_INTERPRET_RESULT] = 'interpretAsciiResult'
+
+DECODE_FUNCS[STATE_INTERPRET_REPEATED_LITERAL] = 'interpretRepeatedLiteral'
+DECODE_FUNCS[STATE_GET_DISTANCE_BITS] = 'getDistanceBits'
+DECODE_FUNCS[STATE_WRITE_REPEATED_LITERAL] = 'writeRepeatedLiteral'
+
+DECODE_FUNCS[STATE_WRITE_SINGLE_LITERAL] = 'writeSingleLiteral'
+
+Decoder.prototype.next = function() {
+  this[DECODE_FUNCS[this.state]]()
+}
+
 Decoder.prototype.decode = function() {
-  while (this.isDecoding() && !this.awaitingData && this.state != STATE_TERMINATED) {
-    switch(this.state) {
-      case STATE_DECODE:
-        var newState = this.bitBuffer & 1 ? STATE_REPEATED_LITERAL : this.singleLiteralState
-        if (this.readBits(1)) {
-          this.state = newState
-        }
-        break
-
-      case STATE_REPEATED_LITERAL: this.decodeRepeatedLiteral(); break
-      case STATE_REPEATED_EXTRA_LENGTH: this.decodeRepeatedExtraLength(); break
-
-      case STATE_BINARY_LITERAL: this.decodeBinaryLiteral(); break
-
-      case STATE_ASCII_LITERAL: this.decodeAsciiLiteral(); break
-      case STATE_ASCII_INTERPRET_RESULT: this.interpretAsciiResult(); break
-
-      case STATE_INTERPRET_REPEATED_LITERAL: this.interpretRepeatedLiteral(); break
-      case STATE_GET_DISTANCE_BITS: this.getDistanceBits(); break
-      case STATE_WRITE_REPEATED_LITERAL: this.writeRepeatedLiteral(); break
-
-      case STATE_WRITE_SINGLE_LITERAL: this.writeSingleLiteral(); break;
-    }
+  while (this.state < STATE_TERMINATED && !this.awaitingData) {
+    this.next()
   }
 }
 
 Decoder.prototype.literalDone = function(lit) {
   this.state = lit >= 0x100 ? STATE_INTERPRET_REPEATED_LITERAL : STATE_WRITE_SINGLE_LITERAL
   this.stateStore.decoded = lit
+}
+
+Decoder.prototype.decodeInitial = function() {
+  var newState = this.bitBuffer & 1 ? STATE_REPEATED_LITERAL : this.singleLiteralState
+  if (this.readBits(1)) {
+    this.state = newState
+    this.next()
+  }
 }
 
 Decoder.prototype.decodeRepeatedLiteral = function() {
@@ -174,6 +182,7 @@ Decoder.prototype.decodeRepeatedLiteral = function() {
   if (extraLengthBits) {
     this.state = STATE_REPEATED_EXTRA_LENGTH
     this.stateStore.lengthCode = lengthCode
+    this.next()
   } else {
     this.literalDone(lengthCode + 0x100)
   }
@@ -183,7 +192,7 @@ Decoder.prototype.decodeRepeatedExtraLength = function() {
   var extraLengthBits = exLenBits[this.stateStore.lengthCode]
     , extraLength = this.bitBuffer & ((1 << extraLengthBits) - 1)
   if (!this.readBits(extraLengthBits)) {
-    if (this.stateStore.lengthCode + extraLength != 0x10E) {
+    if (this.stateStore.lengthCode + extraLength != END_MARKER) {
       return
     } else {
       this.awaitingData = false
@@ -194,12 +203,14 @@ Decoder.prototype.decodeRepeatedExtraLength = function() {
 
   var code = lenBase[this.stateStore.lengthCode] + extraLength
   this.literalDone(code + 0x100)
+  this.next()
 }
 
 Decoder.prototype.decodeBinaryLiteral = function() {
-  var result = this.bitBuffer & 0xFF
+  var result = this.bitBuffer
   if (this.readBits(8)) {
-    this.literalDone(result)
+    this.literalDone(result & 0xFF)
+    this.next()
   }
 }
 
@@ -219,6 +230,7 @@ Decoder.prototype.decodeAsciiLiteral = function() {
     } else {
       if (this.readBits(chBitsAsc[result])) {
         this.literalDone(result)
+        this.next()
       }
       return
     }
@@ -234,6 +246,7 @@ Decoder.prototype.decodeAsciiLiteral = function() {
 
   this.state = STATE_ASCII_INTERPRET_RESULT
   this.stateStore.asciiResult = table[this.bitBuffer & mask]
+  this.next()
 }
 
 Decoder.prototype.interpretAsciiResult = function() {
@@ -241,6 +254,7 @@ Decoder.prototype.interpretAsciiResult = function() {
     return
   }
   this.literalDone(this.stateStore.asciiResult)
+  this.next()
 }
 
 Decoder.prototype.interpretRepeatedLiteral = function() {
@@ -261,6 +275,7 @@ Decoder.prototype.interpretRepeatedLiteral = function() {
   this.state = STATE_GET_DISTANCE_BITS
   this.stateStore.repetitionLength = repetitionLength
   this.stateStore.distPosCode = distPosCode
+  this.next()
 }
 
 Decoder.prototype.getDistanceBits = function() {
@@ -284,6 +299,7 @@ Decoder.prototype.getDistanceBits = function() {
   if (this.readBits(bits)) {
     this.state = STATE_WRITE_REPEATED_LITERAL
     this.stateStore.distance = distance + 1
+    this.next()
   }
 }
 
@@ -340,14 +356,12 @@ Decoder.prototype.readBits = function(numBits) {
     return false
   }
 
-  // Align the extra bits with the high edge of the active byte
-  this.bitBuffer >>= this.extraBits
   // Place the new byte in the second byte of the bitBuffer
-  this.bitBuffer |= this.inBuffer[this.inPos] << 8
+  this.bitBuffer |= this.inBuffer[this.inPos] << (8 + this.extraBits)
   this.inPos++
-  // Shift the bytes down the last necessary part
-  this.bitBuffer >>= numBits - this.extraBits
-  this.extraBits = (this.extraBits - numBits) + 8
+  // Remove the used bits
+  this.bitBuffer >>= numBits
+  this.extraBits += 8 - numBits
   return true
 }
 
