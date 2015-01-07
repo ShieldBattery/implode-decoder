@@ -1,6 +1,6 @@
 {
   "name": "implode-decoder",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A pure JS decoder for the PKWare implode compression algorithm",
   "main": "index.js",
   "scripts": {
@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "concat-stream": "^1.4.7",
-    "pretty-hrtime": "^0.2.2",
+    "pretty-hrtime": "^1.0.0",
     "stream-spigot": "^3.0.4",
     "tape": "^3.0.3",
     "through2": "^0.6.3"
