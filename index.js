@@ -310,9 +310,11 @@ Decoder.prototype.getDistanceBits = function() {
 Decoder.prototype.writeRepeatedLiteral = function() {
   var distance = this.stateStore.distance
     , src = this.workPos - distance
+    , srcEnd = src + this.stateStore.repetitionLength
 
-  this.workBuffer.copy(this.workBuffer, this.workPos, src, src + this.stateStore.repetitionLength)
-  this.workPos += this.stateStore.repetitionLength
+  for (; src < srcEnd; this.workPos++, src++) {
+    this.workBuffer[this.workPos] = this.workBuffer[src]
+  }
   this.maybeOutput()
   this.state = STATE_DECODE
 }

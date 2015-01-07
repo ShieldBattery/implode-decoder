@@ -21,6 +21,10 @@ test('decodes files that were ASCII compressed', function(t) {
   doTest(t, 'large.imploded.ascii', 'large.decomp')
 })
 
+test('decodes large binary files', function(t) {
+  doTest(t, 'binary.imploded', 'binary.decomp')
+})
+
 test('decodes files when buffers are split up', function(t) {
   var d = createDecoder()
     , actual

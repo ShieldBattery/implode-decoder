@@ -4,6 +4,7 @@
   "description": "A pure JS decoder for the PKWare implode compression algorithm",
   "main": "index.js",
   "scripts": {
+    "perftest": "node ./perf/perf.js",
     "test": "tape ./test/*.js"
   },
   "repository": {
