@@ -80,7 +80,7 @@ Decoder.prototype._flush = function(done) {
 
   if (this.isDecoding() && this.workPos > 0x1000) {
     // Flush the remaining decoded bytes
-    var output = new Buffer(this.workPos - 0x1000)
+    var output = Buffer.allocUnsafe(this.workPos - 0x1000)
     this.workBuffer.copy(output, 0, 0x1000, this.workPos)
     this.push(output)
   }
@@ -129,7 +129,7 @@ Decoder.prototype.readHeader = function(block) {
       this.compressionType == CT_BINARY ? STATE_BINARY_LITERAL : STATE_ASCII_LITERAL
   // TODO(tec27): I'm fairly certain this buffer can be sized down (or at the very least, handled
   // differently to avoid copying a lot of data around in it)
-  this.workBuffer = new Buffer(0x2203)
+  this.workBuffer = Buffer.alloc(0x2203)
   this.workPos = 0x1000
 }
 
@@ -332,7 +332,7 @@ Decoder.prototype.maybeOutput = function() {
   }
 
   // Output the 0x1000 bytes we've decoded
-  var output = new Buffer(0x1000)
+  var output = Buffer.allocUnsafe(0x1000)
   this.workBuffer.copy(output, 0, 0x1000, 0x2000)
   this.push(output)
   // Copy the decoded data back around to the first half of the buffer, needed because the
