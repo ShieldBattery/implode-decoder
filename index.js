@@ -85,12 +85,6 @@ Decoder.prototype._flush = function(done) {
     this.push(output)
   }
 
-  if (this.isDecoding() && this.state != STATE_TERMINATED) {
-    this.inBuffer = null
-    this.workBuffer = null
-    return done(new Error('Unexpected end of input'))
-  }
-
   this.inBuffer = null
   this.workBuffer = null
   done()

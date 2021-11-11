@@ -25,6 +25,10 @@ test('decodes large binary files', function(t) {
   doTest(t, 'binary.imploded', 'binary.decomp')
 })
 
+test('decodes files which abruptly end', function(t) {
+  doTest(t, 'no-explicit-end.imploded', 'no-explicit-end.decomp')
+})
+
 test('decodes files when buffers are split up', function(t) {
   var d = createDecoder()
     , actual
